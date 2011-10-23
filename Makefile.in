@@ -102,6 +102,7 @@ CILLY_LIBRARY_MODULES = pretty inthash errormsg alpha trace stats util clist \
               cfg liveness reachingdefs deadcodeelim availexps \
               availexpslv predabst\
               testcil \
+              hashset \
 	      $(CILLY_FEATURES) \
 	      ciloptions feature_config
 # ww: we don't want "main" in an external cil library (cil.cma),
@@ -343,6 +344,7 @@ testcil: $(OBJDIR)/cilly$(EXE)
 
 ODOC_FILES =        ocamlutil/pretty.mli ocamlutil/errormsg.mli \
                     ocamlutil/clist.mli \
+                    ocamlutil/hashset.mli \
 	  	    ocamlutil/stats.mli src/cil.mli src/formatcil.mli \
                     ocamlutil/alpha.mli src/cillower.mli \
                     src/ext/cfg.mli src/ext/dataflow.mli \
@@ -437,6 +439,7 @@ DISTRIB_SRC = cilutil.ml cil.ml cil.mli check.ml check.mli \
 	      cilversion.ml.in
 
 DISTRIB_OCAMLUTIL = pretty.ml pretty.mli errormsg.ml errormsg.mli \
+                    hashset.ml hashset.mli \
                     trace.ml trace.mli stats.ml stats.mli util.ml util.mli \
                     inthash.ml inthash.mli alpha.ml alpha.mli \
 		    intmap.ml intmap.mli clist.ml clist.mli \
