@@ -1,0 +1,2 @@
+Here are some of my changes that I didn't bother to merge back upstream.
+Mostly they are for --conciseHeader option which was meant to suppress expanding header files, but it never worked well enough.

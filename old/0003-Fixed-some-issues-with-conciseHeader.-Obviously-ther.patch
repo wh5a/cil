@@ -1,0 +1,113 @@
+From c9b52f6102b741b80983e4d83b14560e489022ff Mon Sep 17 00:00:00 2001
+From: Wei Hu <weihu@cs.virginia.edu>
+Date: Thu, 21 May 2009 13:13:14 -0400
+Subject: [PATCH 3/4] Fixed some issues with --conciseHeader. Obviously
+ there's still some bug when compiling ghttpd with '-O
+ --merge', as atoi is turned into vfprintf.
+
+---
+ src/cil.ml             |   39 ++++++++++++++++++++-------------------
+ src/frontc/cabs2cil.ml |    4 ++--
+ src/mergecil.ml        |   11 +++++++++--
+ 3 files changed, 31 insertions(+), 23 deletions(-)
+
+diff --git a/src/cil.ml b/src/cil.ml
+index aa9a1c2..5d20e49 100644
+--- a/src/cil.ml
++++ b/src/cil.ml
+@@ -3177,6 +3177,8 @@ class type cilPrinter = object
+      * {!Cil.dumpGlobal}. *)
+ end
+ 
++(* I looked at the standard String module and didn't find many useful functions.
++   Later I found the Str module for more powerful string processing. *)
+ let beginsWith (bigger:string) (smaller:string) : bool =
+   let l = String.length smaller in
+     if l <= String.length bigger &&
+@@ -3981,25 +3983,24 @@ class defaultCilPrinterClass : cilPrinter = object (self)
+           self#pLocation l output
+ 
+     | GVar (vi, io, l) ->
+-        let output () = begin
+-          self#pLineDirective ~forcefile:true l ++
+-            self#pVDecl () vi
+-          ++ chr ' '
+-          ++ (match io.init with
+-              None -> nil
+-            | Some i -> text " = " ++ 
+-                (let islong = 
+-                  match i with
+-                      CompoundInit (_, il) when List.length il >= 8 -> true
+-                    | _ -> false 
+-                  in
+-                   if islong then 
+-                     line ++ self#pLineDirective l ++ text "  " 
+-                   else nil) ++
+-                  (self#pInit () i))
+-          ++ text ";\n"
+-        end in
+-          self#pLocation l output
++        (* Uninitialized globals are considered to be defined in the enclosing header files.
++           Since they are declared as externs in the headers, we cannot only #include them. *)
++        self#pLineDirective ~forcefile:true l ++
++          self#pVDecl () vi
++        ++ chr ' '
++        ++ (match io.init with
++                None -> nil
++              | Some i -> text " = " ++ 
++                  (let islong = 
++                     match i with
++                         CompoundInit (_, il) when List.length il >= 8 -> true
++                       | _ -> false 
++                   in
++                     if islong then 
++                       line ++ self#pLineDirective l ++ text "  " 
++                     else nil) ++
++                    (self#pInit () i))
++        ++ text ";\n"
+           
+     (* print global variable 'extern' declarations, and function prototypes *)    
+     | GVarDecl (vi, l) ->
+diff --git a/src/frontc/cabs2cil.ml b/src/frontc/cabs2cil.ml
+index 6bc3d81..3dcaf1c 100644
+--- a/src/frontc/cabs2cil.ml
++++ b/src/frontc/cabs2cil.ml
+@@ -649,11 +649,11 @@ let newTempVar (descr:doc) (descrpure:bool) typ =
+     E.s (bug "newTempVar called outside a function");
+ (*  ignore (E.log "stripConstLocalType(%a) for temporary\n" d_type typ); *)
+   let t' = (!typeForInsertedVar) (stripConstLocalType typ) in
+-  (* Start with the name "cil___tmp". The alpha converter will fix it
++  (* Start with the name "cil_tmp". The alpha converter will fix it
+      Make the temporary names easily identifiable. May cause problems for ext/rmciltmps that attemps to eliminate tmps.
+      But, is that module ever used? We'll see.
+   let vi = makeVarinfo false "tmp" t' in *)
+-  let vi = makeVarinfo false "cil___tmp" t' in
++  let vi = makeVarinfo false "cil_tmp" t' in
+   vi.vdescr <- descr;
+   vi.vdescrpure <- descrpure;
+   alphaConvertVarAndAddToEnv false  vi (* Do not add to the environment *)
+diff --git a/src/mergecil.ml b/src/mergecil.ml
+index 5ae3fee..33ffd0a 100644
+--- a/src/mergecil.ml
++++ b/src/mergecil.ml
+@@ -1411,8 +1411,15 @@ let oneFilePass2 (f: file) =
+           in
+           if foundthem then begin
+             let argl = argsToList args in
+-            if List.length oldnames <> List.length argl then 
+-              E.s (unimp "After merging the function has more arguments");
++            let lold = List.length oldnames in
++            let lnew = List.length argl in
++            if lold <> lnew then begin
++              (* Wei: Give a warning instead of an exception because it's problematic to --conciseHeader
++              E.s (unimp "After merging the function %s has different arguments (%d -> %d)" fdec.svar.vname lold lnew);
++              *)
++              ignore (warn "After merging the function %s has different arguments (%d -> %d)" fdec.svar.vname lold lnew);
++            end
++            else 
+             List.iter2
+               (fun oldn a -> if oldn <> "" then a.vname <- oldn)
+               oldnames fdec.sformals;
+-- 
+1.7.4.4
+

@@ -1,0 +1,403 @@
+From 584e2626ea51fb16cc1b10d12cd1d1de0b6bd1a6 Mon Sep 17 00:00:00 2001
+From: Wei Hu <weihu@cs.virginia.edu>
+Date: Tue, 19 May 2009 02:43:30 -0400
+Subject: [PATCH 1/4] Collapse expanded form of definitions/declarations from
+ header files.
+
+---
+ src/cil.ml        |  272 +++++++++++++++++++++++++++++++++++------------------
+ src/cil.mli       |    5 +
+ src/ciloptions.ml |   10 ++
+ 3 files changed, 196 insertions(+), 91 deletions(-)
+
+diff --git a/src/cil.ml b/src/cil.ml
+index a7bb129..aa9a1c2 100644
+--- a/src/cil.ml
++++ b/src/cil.ml
+@@ -105,7 +105,13 @@ type lineDirectiveStyle =
+   | LinePreprocessorOutput     (** Use # nnn directives (in gcc mode) *)
+ 
+ let lineDirectiveStyle = ref (Some LinePreprocessorInput)
+- 
++
++(** Controlled by --conciseHeader and --conciseSysHeader *) 
++type headerPrintStyle = ExpandHeader | ConciseHeader | ConciseSysHeader
++
++(** The default behavior is to expand everything *)
++let headerPrintStyle = ref ExpandHeader
++
+ let print_CIL_Input = ref false
+            
+ let printCilAsIs = ref false
+@@ -3171,7 +3177,41 @@ class type cilPrinter = object
+      * {!Cil.dumpGlobal}. *)
+ end
+ 
+-
++let beginsWith (bigger:string) (smaller:string) : bool =
++  let l = String.length smaller in
++    if l <= String.length bigger &&
++      String.compare smaller (String.sub bigger 0 l) == 0
++    then true else false
++    
++let endsWith (bigger:string) (smaller:string) : bool =
++  let l1 = String.length smaller in
++  let l2 = String.length bigger in
++    if l1 <= l2 &&
++      String.compare smaller (String.sub bigger (l2-l1) l1) == 0
++    then true else false
++    
++let isHeader (l:location) : bool =
++  let name = l.file in
++    endsWith name ".h"
++
++(** Does this header file allows to be directly included? *)
++let cantInclude (l:location) : bool = 
++  let unsafes = ["/usr/include/bits/"] in (* Can be extended *)
++  let name = l.file in
++  let rec judge = function
++    [] -> false
++  | a::rest -> if (beginsWith name a) then true else judge rest in
++    (* l.line>0 && *) judge unsafes
++
++(** Is this a system header file? *)
++let isSys (l:location) : bool = 
++  let sysheaders = ["/usr/include"; "/usr/lib/gcc"] in (* Can be extended *)
++  let name = l.file in
++  let rec judge = function
++    [] -> false
++    | a::rest -> if (beginsWith name a) then true else judge rest in
++    judge sysheaders
++    
+ class defaultCilPrinterClass : cilPrinter = object (self)
+   val mutable currentFormals : varinfo list = []
+   method private getLastNamedArgument (s:string) : exp =
+@@ -3675,6 +3715,22 @@ class defaultCilPrinterClass : cilPrinter = object (self)
+ 	in
+ 	leftflush ++ directive ++ chr ' ' ++ num l.line ++ filename ++ line
+ 
++  method private pLocation l output =
++    let condense () = begin
++      currentLoc := l;
++      if l.file <> lastFileName then
++        begin
++	  lastFileName <- l.file;
++          leftflush ++ text "#include \"" ++ text l.file ++ text "\"" ++ line
++        end
++      else
++        nil
++    end in
++    match !headerPrintStyle with
++      | ExpandHeader -> output ()
++      | ConciseHeader -> if (cantInclude l) then nil else if (isHeader l) then condense () else output ()
++      | ConciseSysHeader ->
++          if (cantInclude l) then nil else if (isSys l && isHeader l) then condense () else output ()
+ 
+   method private pStmtKind (next: stmt) () = function
+       Return(None, l) ->
+@@ -3847,96 +3903,120 @@ class defaultCilPrinterClass : cilPrinter = object (self)
+   method pGlobal () (g:global) : doc =       (* global (vars, types, etc.) *)
+     match g with 
+     | GFun (fundec, l) ->
+-        (* If the function has attributes then print a prototype because 
+-        * GCC cannot accept function attributes in a definition *)
+-        let oldattr = fundec.svar.vattr in
+-        (* Always pring the file name before function declarations *)
+-        let proto = 
+-          if oldattr <> [] then 
+-            (self#pLineDirective l) ++ (self#pVDecl () fundec.svar) 
++        let output () = begin
++          (* If the function has attributes then print a prototype because 
++           * GCC cannot accept function attributes in a definition *)
++          let oldattr = fundec.svar.vattr in
++            (* Always print the file name before function declarations *)
++          let proto = 
++            if oldattr <> [] then 
++              (self#pLineDirective l) ++ (self#pVDecl () fundec.svar) 
+               ++ chr ';' ++ line 
+-          else nil in
+-        (* Temporarily remove the function attributes *)
+-        fundec.svar.vattr <- [];
+-        let body = (self#pLineDirective ~forcefile:true l) 
+-                      ++ (self#pFunDecl () fundec) in
+-        fundec.svar.vattr <- oldattr;
+-        proto ++ body ++ line
++            else nil in
++            (* Temporarily remove the function attributes *)
++            fundec.svar.vattr <- [];
++            let body = (self#pLineDirective ~forcefile:true l) 
++              ++ (self#pFunDecl () fundec) in
++              fundec.svar.vattr <- oldattr;
++              proto ++ body ++ line
++        end in
++          self#pLocation l output
+           
+     | GType (typ, l) ->
+-        self#pLineDirective ~forcefile:true l ++
+-          text "typedef "
++        let output () = begin
++          self#pLineDirective l ++
++            text "typedef "
+           ++ (self#pType (Some (text typ.tname)) () typ.ttype)
+           ++ text ";\n"
+-
++        end in
++          self#pLocation l output
++          
+     | GEnumTag (enum, l) ->
+-        self#pLineDirective l ++
+-          text "enum" ++ align ++ text (" " ^ enum.ename) ++
+-          text " {" ++ line
++        let output () = begin
++          self#pLineDirective l ++
++            text "enum" ++ align ++ text (" " ^ enum.ename) ++
++            text " {" ++ line
+           ++ (docList ~sep:(chr ',' ++ line)
+-                (fun (n,i, loc) -> 
+-                  text (n ^ " = ") 
+-                    ++ self#pExp () i)
+-                () enum.eitems)
++                 (fun (n,i, loc) -> 
++                   text (n ^ " = ") 
++                   ++ self#pExp () i)
++                 () enum.eitems)
+           ++ unalign ++ line ++ text "} " 
+           ++ self#pAttrs () enum.eattr ++ text";\n"
++        end in
++          self#pLocation l output
+ 
+     | GEnumTagDecl (enum, l) -> (* This is a declaration of a tag *)
+-        self#pLineDirective l ++
+-          text ("enum " ^ enum.ename ^ ";\n")
++        let output () = begin
++          self#pLineDirective l ++
++            text ("enum " ^ enum.ename ^ ";\n")
++        end in
++          self#pLocation l output
+ 
+     | GCompTag (comp, l) -> (* This is a definition of a tag *)
+-        let n = comp.cname in
+-        let su, su1, su2 =
+-          if comp.cstruct then "struct", "str", "uct"
+-          else "union",  "uni", "on"
+-        in
+-        let sto_mod, rest_attr = separateStorageModifiers comp.cattr in
+-        self#pLineDirective ~forcefile:true l ++
+-          text su1 ++ (align ++ text su2 ++ chr ' ' ++ (self#pAttrs () sto_mod)
+-                         ++ text n
+-                         ++ text " {" ++ line
+-                         ++ ((docList ~sep:line (self#pFieldDecl ())) () 
+-                               comp.cfields)
+-                         ++ unalign)
+-          ++ line ++ text "}" ++
+-          (self#pAttrs () rest_attr) ++ text ";\n"
++        let output () = begin
++          let n = comp.cname in
++          let su, su1, su2 =
++            if comp.cstruct then "struct", "str", "uct"
++            else "union",  "uni", "on"
++          in
++          let sto_mod, rest_attr = separateStorageModifiers comp.cattr in
++            self#pLineDirective ~forcefile:true l ++
++              text su1 ++ (align ++ text su2 ++ chr ' ' ++ (self#pAttrs () sto_mod)
++                            ++ text n
++                            ++ text " {" ++ line
++                            ++ ((docList ~sep:line (self#pFieldDecl ())) () 
++                                   comp.cfields)
++                            ++ unalign)
++            ++ line ++ text "}" ++
++              (self#pAttrs () rest_attr) ++ text ";\n"
++        end in
++          self#pLocation l output
+ 
+     | GCompTagDecl (comp, l) -> (* This is a declaration of a tag *)
+-        self#pLineDirective l ++
+-          text (compFullName comp) ++ text ";\n"
++        let output () = begin
++          self#pLineDirective l ++
++            text (compFullName comp) ++ text ";\n"
++        end in
++          self#pLocation l output
+ 
+     | GVar (vi, io, l) ->
+-        self#pLineDirective ~forcefile:true l ++
+-          self#pVDecl () vi
++        let output () = begin
++          self#pLineDirective ~forcefile:true l ++
++            self#pVDecl () vi
+           ++ chr ' '
+           ++ (match io.init with
+-            None -> nil
+-          | Some i -> text " = " ++ 
++              None -> nil
++            | Some i -> text " = " ++ 
+                 (let islong = 
+                   match i with
+-                    CompoundInit (_, il) when List.length il >= 8 -> true
+-                  | _ -> false 
+-                in
+-                if islong then 
+-                  line ++ self#pLineDirective l ++ text "  " 
+-                else nil) ++
+-                (self#pInit () i))
++                      CompoundInit (_, il) when List.length il >= 8 -> true
++                    | _ -> false 
++                  in
++                   if islong then 
++                     line ++ self#pLineDirective l ++ text "  " 
++                   else nil) ++
++                  (self#pInit () i))
+           ++ text ";\n"
+-      
++        end in
++          self#pLocation l output
++          
+     (* print global variable 'extern' declarations, and function prototypes *)    
+     | GVarDecl (vi, l) ->
+-        if not !printCilAsIs && H.mem builtinFunctions vi.vname then begin
+-          (* Compiler builtins need no prototypes. Just print them in
+-             comments. *)
+-          text "/* compiler builtin: \n   " ++
+-            (self#pVDecl () vi)
++        let output () = begin
++          if not !printCilAsIs && H.mem builtinFunctions vi.vname then begin
++            (* Compiler builtins need no prototypes. Just print them in
++               comments. *)
++            text "/* compiler builtin: \n   " ++
++              (self#pVDecl () vi)
+             ++ text ";  */\n"
+-          
+-        end else
+-          self#pLineDirective l ++
+-            (self#pVDecl () vi)
++              
++          end else
++            self#pLineDirective l ++
++              (self#pVDecl () vi)
+             ++ text ";\n"
++        end in
++        if H.mem builtinFunctions vi.vname then nil else self#pLocation l output
+ 
+     | GAsm (s, l) ->
+         self#pLineDirective l ++
+@@ -3947,38 +4027,42 @@ class defaultCilPrinterClass : cilPrinter = object (self)
+         (* assume anything starting with "ccured" is ours *)
+         (* also don't print the 'combiner' pragma *)
+         (* nor 'cilnoremove' *)
+-        let suppress =
+-          not !print_CIL_Input && 
+-          not !msvcMode &&
+-          ((startsWith "box" an) ||
+-           (startsWith "ccured" an) ||
+-           (an = "merger") ||
+-           (an = "cilnoremove")) in
+-        let d =
+-	  match an, args with
+-	  | _, [] ->
+-              text an
+-	  | "weak", [ACons (symbol, [])] ->
+-	      text "weak " ++ text symbol
+-	  | _ ->
+-            text (an ^ "(")
+-              ++ docList ~sep:(chr ',') (self#pAttrParam ()) () args
+-              ++ text ")"
+-        in
+-        self#pLineDirective l 
+-          ++ (if suppress then text "/* " else text "")
+-          ++ (text "#pragma ")
+-          ++ d
+-          ++ (if suppress then text " */\n" else text "\n")
++        let output() = begin
++          let suppress =
++            not !print_CIL_Input && 
++              not !msvcMode &&
++              ((startsWith "box" an) ||
++                  (startsWith "ccured" an) ||
++                  (an = "merger") ||
++                  (an = "cilnoremove")) in
++          let d =
++	    match an, args with
++	      | _, [] ->
++                  text an
++	      | "weak", [ACons (symbol, [])] ->
++	          text "weak " ++ text symbol
++	      | _ ->
++                  text (an ^ "(")
++                  ++ docList ~sep:(chr ',') (self#pAttrParam ()) () args
++                  ++ text ")"
++          in
++            self#pLineDirective l 
++            ++ (if suppress then text "/* " else text "")
++            ++ (text "#pragma ")
++            ++ d
++            ++ (if suppress then text " */\n" else text "\n")
++        end in
++          self#pLocation l output
+ 
+     | GText s  -> 
+-        if s <> "//" then 
++        if s <> "//" then begin
+           text s ++ text "\n"
++        end
+         else
+           nil
+ 
+ 
+-   method dGlobal (out: out_channel) (g: global) : unit = 
++   method private dGlobal' (out: out_channel) (g: global) : unit = 
+      (* For all except functions and variable with initializers, use the 
+       * pGlobal *)
+      match g with 
+@@ -4018,6 +4102,12 @@ class defaultCilPrinterClass : cilPrinter = object (self)
+ 
+      | g -> fprint out !lineLength (self#pGlobal () g)
+ 
++   method dGlobal (out: out_channel) (g: global) : unit =
++     match !headerPrintStyle with
++      | ExpandHeader -> self#dGlobal' out g
++      | ConciseHeader -> fprint out !lineLength (self#pGlobal () g)
++      | ConciseSysHeader -> fprint out !lineLength (self#pGlobal () g)
++
+    method pFieldDecl () fi = 
+      (self#pType
+         (Some (text (if fi.fname = missingFieldName then "" else fi.fname)))
+diff --git a/src/cil.mli b/src/cil.mli
+index be6057f..830ea58 100644
+--- a/src/cil.mli
++++ b/src/cil.mli
+@@ -2021,6 +2021,11 @@ type lineDirectiveStyle =
+ (** How to print line directives *)
+ val lineDirectiveStyle: lineDirectiveStyle option ref
+ 
++(** Controlled by --conciseHeader and --conciseSysHeader *) 
++type headerPrintStyle = ExpandHeader | ConciseHeader | ConciseSysHeader
++
++val headerPrintStyle : headerPrintStyle ref
++ 
+ (** Whether we print something that will only be used as input to our own 
+  * parser. In that case we are a bit more liberal in what we print *)
+ val print_CIL_Input: bool ref
+diff --git a/src/ciloptions.ml b/src/ciloptions.ml
+index c6eaae0..b2c6c56 100644
+--- a/src/ciloptions.ml
++++ b/src/ciloptions.ml
+@@ -185,6 +185,16 @@ let options : (string * Arg.spec * string) list =
+                 Cprint.printLnComment := true),
+     " Print commented #line directives in the output only when\n\t\t\t\tthe line number changes.";
+ 
++    "--conciseHeader", 
++    Arg.Unit (fun _ ->
++                Cil.headerPrintStyle := Cil.ConciseHeader),
++    " Print #include \"...\" for declarations/definitions from header files,\n\t\t\t\tinstead of printing the whole thing.";
++
++    "--conciseSysHeader", 
++    Arg.Unit (fun _ ->
++                Cil.headerPrintStyle := Cil.ConciseSysHeader),
++    " Print #include \"...\" for declarations/definitions from header files,\n\t\t\t\tonly if they are system headers.";
++
+     "--stats",
+     Arg.Set Cilutil.printStats,
+     (" Print statistics about running times and memory usage" ^
+-- 
+1.7.4.4
+

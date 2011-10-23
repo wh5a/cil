@@ -1,0 +1,169 @@
+From bfea324c70bf2bf4539277e3d38d0af0e2f756cb Mon Sep 17 00:00:00 2001
+From: Wei Hu <weihu@cs.virginia.edu>
+Date: Sun, 24 May 2009 23:53:56 -0400
+Subject: [PATCH 4/4] Don't merge inline functions with --conciseHeader.
+ Finally a near-perfect solution.
+
+---
+ src/mergecil.ml |   46 +++++++++++++++++++++++-----------------------
+ 1 files changed, 23 insertions(+), 23 deletions(-)
+
+diff --git a/src/mergecil.ml b/src/mergecil.ml
+index 33ffd0a..6154919 100644
+--- a/src/mergecil.ml
++++ b/src/mergecil.ml
+@@ -51,6 +51,8 @@ open Trace
+ 
+ let debugMerge = false
+ let debugInlines = false
++let debugGetNode = false
++let debugFind = false
+ 
+ let ignore_merge_conflicts = ref false
+ 
+@@ -65,11 +67,15 @@ let usePathCompression = false
+ (* Try to merge definitions of inline functions. They can appear in multiple 
+  * files and we would like them all to be the same. This can slow down the 
+  * merger an order of magnitude !!! *)
+-let mergeInlines = true
+ 
+-let mergeInlinesRepeat = mergeInlines && true
++(* Wei: Merging inlines is problematic to --conciseHeader. Two unrelated functions,
++   say vprintf and atoi, are merged together when compiling ghttpd with -O.
++   I should probably debug and fix the problem instead of avoiding it. *)
++let mergeInlines = ref true
++
++let mergeInlinesRepeat = ref true
+ 
+-let mergeInlinesWithAlphaConvert = mergeInlines && true
++let mergeInlinesWithAlphaConvert = ref true
+ 
+ (* when true, merge duplicate definitions of externally-visible functions;
+  * this uses a mechanism which is faster than the one for inline functions,
+@@ -132,8 +138,6 @@ let mkSelfNode (eq: (int * string, 'a node) H.t) (* The equivalence table *)
+     H.add syn name res; 
+   res
+ 
+-let debugFind = false
+-
+ (* Find the representative with or without path compression *)
+ let rec find (pathcomp: bool) (nd: 'a node) = 
+   if debugFind then
+@@ -244,7 +248,6 @@ let getNode    (eq: (int * string, 'a node) H.t)
+                (syn: (string, 'a node) H.t)
+                (fidx: int) (name: string) (data: 'a) 
+                (l: (location * int) option) = 
+-  let debugGetNode = false in
+   if debugGetNode then 
+     ignore (E.log "getNode(%s(%d), %a)\n"
+               name fidx d_nloc l);
+@@ -408,8 +411,13 @@ let init () =
+   H.clear emittedFunDefn;
+   H.clear emittedVarDefn;
+ 
+-  H.clear originalVarNames
++  H.clear originalVarNames;
+ 
++  match !headerPrintStyle with
++    | ExpandHeader -> mergeInlines := true
++    | _ -> mergeInlines := false;
++  mergeInlinesRepeat := !mergeInlines && true;
++  mergeInlinesWithAlphaConvert := !mergeInlines && true
+ 
+ (* Some enumerations have to be turned into an integer. We implement this by
+  * introducing a special enumeration type which we'll recognize later to be
+@@ -869,7 +877,7 @@ let rec oneFilePass1 (f:file) : unit =
+           if fdec.svar.vstorage <> Static then begin
+             matchVarinfo fdec.svar (l, !currentDeclIdx)
+           end else begin
+-            if fdec.svar.vinline && mergeInlines then 
++            if fdec.svar.vinline && !mergeInlines then 
+               (* Just create the nodes for inline functions *)
+               ignore (getNode iEq iSyn !currentFidx 
+                         fdec.svar.vname fdec.svar (Some (l, !currentDeclIdx)))
+@@ -1414,10 +1422,7 @@ let oneFilePass2 (f: file) =
+             let lold = List.length oldnames in
+             let lnew = List.length argl in
+             if lold <> lnew then begin
+-              (* Wei: Give a warning instead of an exception because it's problematic to --conciseHeader
+               E.s (unimp "After merging the function %s has different arguments (%d -> %d)" fdec.svar.vname lold lnew);
+-              *)
+-              ignore (warn "After merging the function %s has different arguments (%d -> %d)" fdec.svar.vname lold lnew);
+             end
+             else 
+             List.iter2
+@@ -1427,7 +1432,7 @@ let oneFilePass2 (f: file) =
+             setFormals fdec fdec.sformals
+           end;
+           (** See if we can remove this inline function *)
+-          if fdec'.svar.vinline && mergeInlines then begin
++          if fdec'.svar.vinline && !mergeInlines then begin
+             let printout = 
+               (* Temporarily turn of printing of lines *)
+               let oldprintln = !lineDirectiveStyle in
+@@ -1453,7 +1458,7 @@ let oneFilePass2 (f: file) =
+               in
+               (* Remember the original type *)
+               let origType = fdec'.svar.vtype in
+-              if mergeInlinesWithAlphaConvert then begin
++              if !mergeInlinesWithAlphaConvert then begin
+                 (* Rename the formals *)
+                 List.iter renameOne fdec'.sformals;
+                 (* Reflect in the type *)
+@@ -1465,7 +1470,7 @@ let oneFilePass2 (f: file) =
+               let res = d_global () g' in
+               lineDirectiveStyle := oldprintln;
+               fdec'.svar.vname <- newname;
+-              if mergeInlinesWithAlphaConvert then begin
++              if !mergeInlinesWithAlphaConvert then begin
+                 (* Do the locals in reverse order *)
+                 List.iter undoRenameOne (List.rev fdec'.slocals);
+                 (* Do the formals in reverse order *)
+@@ -1498,7 +1503,7 @@ let oneFilePass2 (f: file) =
+                * We should reuse this, but watch for the case when the inline 
+                * was already used. *)
+               if H.mem varUsedAlready fdec'.svar.vname then begin
+-                if mergeInlinesRepeat then begin
++                if !mergeInlinesRepeat then begin
+                   repeatPass2 := true
+                 end else begin
+                   ignore (warn "Inline function %s because it is used before it is defined" fdec'.svar.vname);
+@@ -1680,7 +1685,7 @@ let oneFilePass2 (f: file) =
+   (* See if we must re-visit the globals in this file because an inline that 
+    * is being removed was used before we saw the definition and we decided to 
+    * remove it *)
+-  if mergeInlinesRepeat && !repeatPass2 then begin
++  if !mergeInlinesRepeat && !repeatPass2 then begin
+     if debugMerge || !E.verboseFlag then 
+       ignore (E.log "Repeat final merging phase (%d): %s\n" 
+                 !currentFidx f.fileName);
+@@ -1726,7 +1731,7 @@ let merge (files: file list) (newname: string) : file =
+     doMergeSynonyms sSyn sEq matchCompInfo;
+     doMergeSynonyms eSyn eEq matchEnumInfo;
+     doMergeSynonyms tSyn tEq matchTypeInfo;
+-    if mergeInlines then begin 
++    if !mergeInlines then begin 
+       (* Copy all the nodes from the iEq to vEq as well. This is needed 
+        * because vEq will be used for variable renaming *)
+       H.iter (fun k n -> H.add vEq k n) iEq;
+@@ -1740,7 +1745,7 @@ let merge (files: file list) (newname: string) : file =
+     dumpGraph "struct and union" sEq;
+     dumpGraph "enum" eEq;
+     dumpGraph "variable" vEq;
+-    if mergeInlines then dumpGraph "inline" iEq;
++    if !mergeInlines then dumpGraph "inline" iEq;
+   end;
+   (* Make the second pass over the files. This is when we start rewriting the 
+    * file *)
+@@ -1762,8 +1767,3 @@ let merge (files: file list) (newname: string) : file =
+    * name wrong. Make sure now that the local names are unique. *)
+   uniqueVarNames res; 
+   res
+-
+-
+-
+-
+-
+-- 
+1.7.4.4
+
