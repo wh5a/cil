@@ -135,11 +135,13 @@ ocamlbuild:
 
 cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
+			cillib \
                         $(CILLY_CMODULES:%=$(OBJDIR)/%.$(CMC))
 	@$(NARRATIVE) "Linking $(COMPILETOWHAT) $@ $(LINKMSG)"
-	$(AT)$(CAMLLINK) -verbose -o $@ \
+	$(AT)$(CAMLLINK) -verbose -o $@ -ccopt -L$(OBJDIR) \
                     $(CILLY_LIBS:%=%.$(CMXA)) \
-                    $^
+                    $(OBJDIR)/cil.$(CMXA) \
+                    $(OBJDIR)/main.$(CMO)
 
 
 quickbuild: cilversion machdep cilly lib/Cilly.pm
@@ -290,14 +292,20 @@ OCAML_CIL_LIB_CMODULES := perfcount
 OCAML_CIL_C_LIB_MODULES := $(CILLY_MODULES:main=) libmaincil
 
 # Build an OCAML library (CMA / CMXA) that exports our Cil stuff
-$(OBJDIR)/cil.$(CMXA): $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a) \
+ifeq ($(NATIVECAML),1)
+  FLAG_TO_LINK_LIB := -cclib
+else
+  FLAG_TO_LINK_LIB := -dllib
+endif
+
+$(OBJDIR)/cil.$(CMXA): $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/dll%.so) \
                        $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
-	$(CAMLLINK) -a -o $@ -ccopt -L$(pkglibdir) \
-               $(OCAML_CIL_LIB_CMODULES:%=-cclib -l%) \
+	$(CAMLLINK) -a -o $@ \
+               $(OCAML_CIL_LIB_CMODULES:%=$(FLAG_TO_LINK_LIB) -l%) \
                $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
 
-$(OBJDIR)/libperfcount.a: %: %($(OBJDIR)/perfcount.$(CMC))
-	ranlib $@
+$(OBJDIR)/dllperfcount.so: $(OBJDIR)/perfcount.o
+	ocamlmklib -o $(OBJDIR)/perfcount $^
 
 # sm: for Simon: build a library of CIL functions which can
 # be called from C code; this is like the target above, except

@@ -38,10 +38,6 @@ refer to the 'install-findlib' target in the Makefile. Or, we can simply do:
    ln -s `pwd`/META obj/x86_LINUX/
    sudo ln -s `pwd`/obj/x86_LINUX/ `ocamlfind printconf path`/cil
 
-Before we are ready to go, cil's META depends on nums, but ocaml-findlib only installs num,
-although they are the same thing. So:
-   sudo ln -s `ocamlfind printconf path`/num `ocamlfind printconf path`/nums
-
 Now, to use CIL as a lib, do something like this:
    ocamlfind ocamlc -verbose -package cil -linkpkg extension.ml
 Or to use ocaml-batteries as a drop-in replacement, do
