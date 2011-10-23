@@ -1,3 +1,9 @@
 # subdirectories containing source code
 "ocamlutil": include
 "src": include
+
+# Activate the annot flag
+<**/*.ml>: annot
+
+# Generate debugging info
+true: debug
