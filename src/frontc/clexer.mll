@@ -275,7 +275,7 @@ let init ~(filename: string) : Lexing.lexbuf =
   Lexerhack.push_context := push_context;
   Lexerhack.pop_context := pop_context;
   Lexerhack.add_identifier := add_identifier;
-  E.startParsing filename
+  E.startParsing ~useBasename:false filename
 
 
 let finish () = 
