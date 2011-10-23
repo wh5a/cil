@@ -1,0 +1,25 @@
+To create TAGS
+  otags -r <dir>
+camlp4 doesn't support .mll or .mly
+
+In .emacs we add the tags for cil and ocaml:
+(setq tags-table-list
+      '("/home/wh5a/cil/TAGS" "/var/lib/otags/emacs/TAGS"))
+
+To find a tag:
+M-. tag <RET>
+Find first definition of tag (find-tag). 
+C-u M-.
+Find next alternate definition of last tag specified. 
+C-u - M-.
+Go back to previous tag found. 
+C-M-. pattern <RET>
+Find a tag whose name matches pattern (find-tag-regexp). 
+C-u C-M-.
+Find the next tag whose name matches the last pattern used. 
+C-x 4 . tag <RET>
+Find first definition of tag, but display it in another window (find-tag-other-window). 
+C-x 5 . tag <RET>
+Find first definition of tag, and create a new frame to select the buffer (find-tag-other-frame). 
+M-*
+Pop back to where you previously invoked M-. and friends.

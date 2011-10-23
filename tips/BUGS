@@ -1,0 +1,28 @@
+================= 1 =====================
+Using CIL normally is usually a smooth process. However, the merger
+and the simplifier are less tested (I think) and hence more
+buggy. I've worked around most of them when dealing with SPEC CPU 2006
+benchmarks, but there's still a problem building 403.gcc with --merge
+--dosimplify.
+
+The simplifier converts pointers to field to explicit offset
+calculation, which needs the precise layout of structs. The merger, on
+the other hand, eliminates duplicate struct definitions scattered
+across files. The two usually work together just fine, but with
+403.gcc there's a bug I failed to fix.
+
+Now, the work flow of CIL merger is interesting. It first merges the
+files into a big intermediate language, and starts the regular
+analysis/transformation passes. Presumably, this is to simplify the
+job of analysis writers: you can consider your input as a single
+complete file. But since the merger changes the source, your analysis
+may stop working (e.g. --dosimplify). If we do the other way around,
+i.e. perform transformation passes first then merge, it should then
+work as the simplifier still sees unchanged separate files. By the
+same reasoning, we should be able to run CIL again on the merged
+file. However, this is NOT true for 403.gcc!!
+
+After merging gcc source code and feed it back to CIL again, CIL
+complains about invalid combination of type specifiers. It seems that,
+removing the "const" qualifiers would work, but still it's
+strange. Other SPEC benchmarks don't have this "reentrance" problem.

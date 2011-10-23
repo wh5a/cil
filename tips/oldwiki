@@ -1,0 +1,21 @@
+After removing unused declarations, CIL expands every header file, which makes the final output hard for humans to read. Depending on whether the analyzer has a library model, this behavior may help the analyzer or confuse it.
+
+The basic idea is to add a command option to collapse the expanded form of declarations/definitions back to “#include <…>”. Normally we don’t want to see the details of system headers, but we may be interested in user headers, so I provide two options: —conciseHeader and —conciseSysHeader. Because we may generate multiple inclusions of the same header, we assume that the header has taken proper measures to prevent multiple inclusion.
+
+However, this turned out not as easy as I thought. The first problem is that some header files (in /usr/include/bits/) are machine-dependent and don’t allow to be included directly. If I didn’t include it and falled back to expanding the definition, some other header file would be including this very file and cause a multiple definition error. The workaround is to omit a definition if it’s from a non-includable file, and let other files include it indirectly (this should always be true).
+
+The other problem, however, seems impossible to solve. CIL gives names to anonymous structs/unions/enums (see anonStructName in frontc/cabs2cil.ml). CIL may also rename names of nested structures before lifting them to global scope. This behavior causes a discrepancy between the original header file and the cillyfied source file which assumes a changed declaration.
+
+For example, server.c from nulhttpd uses the sigaction data structure:
+
+sa.sa_handler = server_shutdown;
+CIL changes the sigaction struct by giving a name to the anonymous nested union and now the code becomes:
+
+sa.__sigaction_handler.sa_handler = (void (*)(int ))(& server_shutdown);
+which only works with CIL’s sigaction definition.
+
+In conclusion, the header files are not always usable. We are still providing the two options and they may be useful for debugging purposes. However, don’t expect the output code to always compile. The default behavior remains the same.
+
+UPDATE: Another problem found. Without —save-temps, temporary .cil.c files are created in /tmp and they may fail to find header files in the source directory. There are several solutions: enable —save-temps, edit the makefile to extend the search path, or replace —conciseHeader with —conciseSysHeader.
+
+Merging is a tricky process and I had to suppress merging inline functions when “—conciseHeader —merge -O” is on.
