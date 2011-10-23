@@ -649,8 +649,11 @@ let newTempVar (descr:doc) (descrpure:bool) typ =
     E.s (bug "newTempVar called outside a function");
 (*  ignore (E.log "stripConstLocalType(%a) for temporary\n" d_type typ); *)
   let t' = (!typeForInsertedVar) (stripConstLocalType typ) in
-  (* Start with the name "tmp". The alpha converter will fix it *)
-  let vi = makeVarinfo false "tmp" t' in
+  (* Start with the name "cil_tmp". The alpha converter will fix it
+     Make the temporary names easily identifiable. May cause problems for ext/rmciltmps that attemps to eliminate tmps.
+     But, is that module ever used? We'll see.
+  let vi = makeVarinfo false "tmp" t' in *)
+  let vi = makeVarinfo false "cil_tmp" t' in
   vi.vdescr <- descr;
   vi.vdescrpure <- descrpure;
   alphaConvertVarAndAddToEnv false  vi (* Do not add to the environment *)
