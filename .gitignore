@@ -8,6 +8,7 @@
 /*.s
 /*.asm
 /*.out
+/*.annot
 /allheaders
 /allcfiles
 /allmlfiles
