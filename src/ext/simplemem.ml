@@ -62,7 +62,7 @@ let rec array_to_pointer tau =
 let make_temp tau = 
   let tau = array_to_pointer tau in 
   match !thefunc with
-    Some(fundec) -> makeTempVar fundec ~name:("mem_") tau
+    Some(fundec) -> makeTempVar fundec ~name:("cil_mem") tau
   | None -> failwith "simplemem: temporary needed outside a function"
 
 (* separate loffsets into "scalar addition parts" and "memory parts" *)
