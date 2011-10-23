@@ -1,0 +1,12 @@
+#! /bin/sh
+./ext tests/no-ptr.c
+gcc -g -Wl,-T,runtime/ld_script runtime/protect.c tests/no-ptr.c.cil.c -o tests/no-ptr
+./tests/no-ptr
+
+# ./ext tests/struct-noptr.c
+# gcc -g -Wl,-T,runtime/ld_script runtime/protect.c tests/struct-noptr.c.cil.c -o tests/struct-noptr
+# ./tests/struct-noptr
+
+#./ext tests/no-heap.c
+#gcc -g -Wl,-T,runtime/ld_script runtime/protect.c tests/no-heap.c.cil.c -o tests/no-heap
+#./tests/no-heap

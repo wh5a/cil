@@ -1,0 +1,36 @@
+How to print types:
+  ignore (Pretty.printf "%a\n" (plainCilPrinter#pType None) getrlimitT)
+
+Call a function:
+(* void *malloc(size_t size); *)
+let build_malloc (f:file) =
+  let t = cType "void *()(unsigned int)" []
+  findOrCreateFunc f "malloc" t
+
+  (* Allocate shadow stack *)
+  let callMalloc =
+    cStmt "malloc(rlimit_vi.rlim_cur);"
+      (fun n t -> makeTempVar main_fun ~name:n t)
+      locUnknown
+      [("malloc", Fv (build_malloc f))
+      ;("rlimit_vi", Fv rlimit_vi)]
+
+A simple example:
+    let tmpInstrs = [cInstr "idx = y + 5;" !currentLoc
+                     [("idx", Fv (makeVarinfo false "idx" intType))
+                     ;("y", Fv (makeVarinfo false "y" intType))
+                     ];
+                     cInstr "idx = y + 7;" !currentLoc
+                     [("idx", Fv (makeVarinfo false "idx" intType))
+                     ;("y", Fv (makeVarinfo false "y" intType))
+                     ]
+                    ]
+
+
+How to log:
+    (* log "%a, %a, %a\n" d_lval lval d_plainlval lval d_exp myAddr *)
+
+
+update_shadows
+update_stacks
+update_heaps
