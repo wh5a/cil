@@ -128,8 +128,12 @@ let mkSelfNode (eq: (int * string, 'a node) H.t) (* The equivalence table *)
               nrep  = Obj.magic 1; nmergedSyns = false; } in
   res.nrep <- res; (* Make the self cycle *)
   H.add eq (fidx, name) res; (* Add it to the proper table *)
-  if mergeSynonyms && not (prefix "__anon" name) then 
-    H.add syn name res; 
+    (* WEI: For things I don't understand yet, CIL doesn't merge anonymous struct/union's
+       created by CIL itself. Merge fails for more than two files that all #include <math.h>,
+       compiled with -O, as mutiple definitions of functions fail to be merged because they
+       refer to anonymous structs. This breaks many SPEC benchmarks. *)
+  if mergeSynonyms (* && not (prefix "__anon" name) *) then
+    H.add syn name res;
   res
 
 let debugFind = false
@@ -312,6 +316,24 @@ let vEnv : (string, varinfo node) H.t = H.create 111
 (* A set of inline functions indexed by their printout ! *)
 let inlineBodies : (P.doc, varinfo node) H.t = H.create 111
 
+(* A set of inline functions. Set is a persistent data structure, so we use Hashtbl instead *)
+let inlineNames : (string, unit) H.t = H.create 17
+(* WEI: CIL merger has a serious problem:
+   CIL gives names to anonymous struct/union's. Depending on the inclusion order,
+   a single struct defined in a header file may be named differently. 
+   If compiled separately, there's no problem.
+   But if we merge them, inline functions that refer to the structs become multiple
+   copies of the same function, and cannot be merged because their source code is
+   slightly different, referring to slightly different struct definitions.
+   The linker would then fail because multiple functions are defined with the same name.
+   The problem appears in a bunch of SPEC 2006 benchmarks, all of which #include <math.h>.
+   
+   This workaround simply removes inline functions that have been defined previously,
+   regardless of whether their actual definition is the same.
+   So this could be a DANGEROUS change, be careful!
+*)
+let removeDuplicateInline = true
+
 (** A number of alpha conversion tables. We ought to keep one table for each 
  * name space. Unfortunately, because of the way the C lexer works, type 
  * names must be different from variable names!! We one alpha table both for 
@@ -397,6 +419,7 @@ let init () =
 
   H.clear formalNames;
   H.clear inlineBodies;
+  H.clear inlineNames;
 
   currentFidx := 0;
   currentDeclIdx := 0;
@@ -1422,7 +1445,7 @@ let oneFilePass2 (f: file) =
           (** See if we can remove this inline function *)
           if fdec'.svar.vinline && mergeInlines then begin
             let printout = 
-              (* Temporarily turn of printing of lines *)
+              (* Temporarily turn off printing of lines *)
               let oldprintln = !lineDirectiveStyle in
               lineDirectiveStyle := None;
               (* Temporarily set the name to all functions in the same way *)
@@ -1506,9 +1529,16 @@ let oneFilePass2 (f: file) =
               fdec'.svar.vname <- origname;
               () (* Drop this definition *)
             with Not_found -> begin
+              (* Now look at the name set *)
+              if removeDuplicateInline && H.mem inlineNames origname then begin
+                E.warn "Unsafely drop the definition of %s from %s\n" origname
+                          (H.find fileNames !currentFidx);
+              end else begin
               if debugInlines then ignore (E.log " Not found\n");
+              H.add inlineNames origname ();
               H.add inlineBodies printout inode;
               mergePushGlobal g'
+              end
             end
           end else begin
             (* either the function is not inline, or we're not attempting to 
