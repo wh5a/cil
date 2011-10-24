@@ -97,6 +97,10 @@ let warnFlag = ref false
 
 let logChannel : out_channel ref = ref stderr
 
+let contextMessage (name: string) (d: doc) = 
+  ignore (fprintf !logChannel "%s: %a@!" name insert d);
+  showContext ()
+
 let redEscStr = "\027[31;1m"
 let greenEscStr = "\027[32;1m"
 let yellowEscStr = "\027[33;1m"
