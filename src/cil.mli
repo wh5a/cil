@@ -2652,6 +2652,9 @@ val warnTruncate: bool ref
 (** Machine model specified via CIL_MACHINE environment variable *)
 val envMachine : Machdep.mach option ref
 
+(** Returns true if an offset is a bitfield. *)
+val isBitField: offset -> bool
+
 (* ------------------------------------------------------------------------- *)
 (*                            DEPRECATED FUNCTIONS                           *)
 (*                        These will eventually go away                      *)

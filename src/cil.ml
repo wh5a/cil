@@ -1921,7 +1921,7 @@ and typeOffset basetyp =
  **
  **)
 exception SizeOfError of string * typ
-
+exception SizeInBytes of int
 
 let unsignedVersionOf (ik:ikind): ikind =
   match ik with
@@ -2447,8 +2447,13 @@ and bitsSizeOf t =
              There are other places in these cil.ml that overflow can occur,
              but this multiplication is the most likely to be a problem. *)
           if not (is_int_cilint sz) then
-            raise (SizeOfError ("Array is so long that its size can't be "
-                                  ^"represented with an OCaml int.", t))
+            (* Check if the size in bytes (instead of bits) can be represented *)
+            let sz' = div_cilint sz (cilint_of_int 8) in
+              if not (is_int_cilint sz') then
+                raise (SizeOfError ("Array size " ^ (string_of_cilint sz) ^ " bits can't be "
+                                    ^"represented with an OCaml int.", t))
+                  (* Represent the size in bytes which must be caught by caller *)
+              else raise (SizeInBytes (int_of_cilint sz')) (* WEI: Do we need to round like below?? *)
           else
             addTrailing (int_of_cilint sz) (8 * alignOf_int t)
       | _ -> raise (SizeOfError ("array non-constant length", t))
@@ -2559,6 +2564,7 @@ and constFold (machdep: bool) (e: exp) : exp =
         let bs = bitsSizeOf t in
         kinteger !kindOfSizeOf (bs / 8)
       with SizeOfError _ -> e
+        |  SizeInBytes bs' -> kinteger !kindOfSizeOf bs'
   end
   | SizeOfE e when machdep -> constFold machdep (SizeOf (typeOf e))
   | SizeOfStr s when machdep -> kinteger !kindOfSizeOf (1 + String.length s)
@@ -3914,6 +3920,8 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           text (compFullName comp) ++ text ";\n"
 
     | GVar (vi, io, l) ->
+        (* Uninitialized globals are considered to be defined in the enclosing header files.
+           Since they are declared as externs in the headers, we cannot only #include them. *)
         self#pLineDirective ~forcefile:true l ++
           self#pVDecl () vi
           ++ chr ' '
@@ -6836,6 +6844,14 @@ let d_formatarg () = function
   | FS _ -> dprintf "FS"
 
   | FX _ -> dprintf "FX()"
+
+let rec isBitField = function
+    Field (fi,o) -> begin
+      match fi.fbitfield with
+          Some _ -> true
+        | None -> isBitField o
+    end
+  | NoOffset | Index _ -> false
 
 (* ------------------------------------------------------------------------- *)
 (*                            DEPRECATED FUNCTIONS                           *)

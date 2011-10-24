@@ -60,7 +60,7 @@
                 contains only "basic"
 
  - all sizeof and alignof are turned into constants
- - accesses to variables whose address is taken is turned into "Mem" accesses
+ - accesses to variables whose address is taken is turned into "Mem" accesses (* WEI: I made it not true!! *)
  - same for accesses to arrays
  - all field and index computations are turned into address arithmetic, 
    including bitfields.
@@ -75,8 +75,6 @@ module H = Hashtbl
 
 type taExp = exp (* Three address expression *)
 type bExp = exp  (* Basic expression *)
-
-let debug = true
 
 (* Whether to split structs *)
 let splitStructs = ref true
@@ -119,8 +117,11 @@ let rec makeThreeAddress
       | _ -> (* This is impossible, because we are taking the address 
           * of v and simplifyLval should turn it into a Mem, except if the 
           * sizeof has failed.  *)
+          (* WEI: this becomes possible after we've changed simplifyLval
           E.s (bug "Simplify: makeThreeAddress for AddrOf(LV=%a, LVT=%a)"
               d_lval lv d_type (typeOfLval lv))
+          *)
+          e
   end
   | StartOf lv -> 
       makeThreeAddress setTemp (AddrOf (addOffsetLval (Index(zero, NoOffset))
@@ -128,7 +129,7 @@ let rec makeThreeAddress
 
 (* Make a basic expression *)      
 and makeBasic (setTemp: taExp -> bExp) (e: exp) : bExp = 
-  let dump = false (* !currentLoc.line = 395 *) in
+  let dump = false in
   if dump then
     ignore (E.log "makeBasic %a\n" d_plainexp e);
   (* Make it a three address expression first *)
@@ -214,7 +215,9 @@ and simplifyLval
     | Field(fi, _) -> E.s (bug "bug in offsetToInt")
   in
   match lv with 
-    Mem a, off -> 
+    Mem a, off ->
+      if isBitField off then lv
+      else begin
       let offidx, restoff = offsetToInt (typeOfLval (Mem a, NoOffset)) off in
       let a' = 
         if offidx <> zero then 
@@ -224,6 +227,13 @@ and simplifyLval
       in
       let a' = if !simpleMem then makeBasic setTemp a' else a' in
       Mem (mkCast a' (typeForCast restoff)), restoff
+      end
+
+  (*
+  (* WEI: I'm not sure why CIL developers would want to do this, but rewriting code this way can break some C black magic.
+     See test/va_arg.c
+     One reason this may be useful is that it makes the memory access explicit for pointer analysis.
+     I'm commenting the code out, hoping it doesn't break anything. *)
   (* We are taking this variable's address; but suppress simplification if it's a simple function
    * call in no-convert mode*)
   | Var v, off when v.vaddrof && (!convertDirectCalls || not (isFunctionType (typeOfLval lv) ))  ->
@@ -239,6 +249,7 @@ and simplifyLval
       in
       let a' = if !simpleMem then setTemp a' else a' in
       Mem (mkCast a' (typeForCast restoff)), restoff
+  *)
 
   | Var v, off -> 
       (Var v, simplifyOffset setTemp off)
@@ -276,7 +287,19 @@ class threeAddressVisitor (fi: fundec) = object (self)
      (** We want the argument in calls to be simple variables *)
   method vinst (i: instr) =
     match i with 
-      Call (someo, f, args, loc) -> 
+      (* Handle two special functions to which we changed the arguments (see cil.ml).
+         There are some problems but hopefully the functions are special enough that these problems don't exist:
+         1. The functions are referenced through pointers so they aren't detected
+         2. Their return value is stored in some lval which should be simplified.
+         3. The first argument of va_arg is a complex expression which should be simplified.
+
+         Anyway, the worst result is that they're not simplified to three-address code, but they're still correct.
+      *)
+      Call(_,(Lval (Var vi,NoOffset)),_,_)
+        when vi.vname = "__builtin_va_arg"
+          || vi.vname = "__builtin_types_compatible_p" ->
+            SkipChildren
+    | Call (someo, f, args, loc) ->
         let someo' = 
           match someo with 
             Some lv -> Some (simplifyLval self#makeTemp lv)
@@ -285,7 +308,7 @@ class threeAddressVisitor (fi: fundec) = object (self)
         let f' = makeBasic self#makeTemp f in
         let args' = Util.list_map (makeBasic self#makeTemp) args in 
         ChangeTo [ Call (someo', f', args', loc) ]
-  | _ -> DoChildren
+    | _ -> DoChildren
 
       (* This method will be called only on top-level "lvals" (those on the 
        * left of assignments and function calls) *)
