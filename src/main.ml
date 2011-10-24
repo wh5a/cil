@@ -237,16 +237,6 @@ let theMain () =
                 (if !outName = "" then "stdout" else !outName) in
             if !E.hadErrors then
               E.s (E.error "There were errors during merging");
-            (* See if we must save the merged file *)
-            (match !mergedChannel with
-              None -> ()
-            | Some mc -> begin
-                let oldpci = !C.print_CIL_Input in
-                C.print_CIL_Input := true;
-                Stats.time "printMerged"
-                  (C.dumpFile !C.printerForMaincil mc.fchan mc.fname) merged;
-                C.print_CIL_Input := oldpci
-            end);
             merged
       in
 
@@ -254,7 +244,21 @@ let theMain () =
         E.s (E.error "Cabs2cil had some errors");
 
       (* process the CIL file (merged if necessary) *)
-      processOneFile one
+      processOneFile one;
+
+      (* See if we must save the merged file AFTER processing it *)
+      match files with
+        | [] | [_] -> ()
+        | _ ->
+            match !mergedChannel with
+                None -> ()
+              | Some mc -> begin
+                  let oldpci = !C.print_CIL_Input in
+                    C.print_CIL_Input := true;
+                    Stats.time "printMerged"
+                      (C.dumpFile !C.printerForMaincil mc.fchan mc.fname) one;
+                    C.print_CIL_Input := oldpci
+                end
   end
 ;;
                                         (* Define a wrapper for main to 
