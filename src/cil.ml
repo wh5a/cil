@@ -4050,6 +4050,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
       ++ text "{ "
       ++ (align
             (* locals. *)
+            ++ line
             ++ (docList ~sep:line (fun vi -> self#pVDecl () vi ++ text ";") 
                   () f.slocals)
             ++ line ++ line
