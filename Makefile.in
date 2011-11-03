@@ -567,8 +567,8 @@ publish_distrib: publish_doc
 
 MAINBRANCH=develop
 publish_doc: doc
-	git checkout gh-pages; \
-	cp -rf doc/html/cil/* . && git commit -am .; echo "Done publishing doc"; \
+	git checkout gh-pages;
+	cp -rf doc/html/cil/* doc/ && git commit -am "Automatic doc update"; echo "Done publishing doc"; \
 	git checkout $(MAINBRANCH)
 
 cleancheck:
