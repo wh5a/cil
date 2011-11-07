@@ -357,7 +357,12 @@ distclean: clean
 	rm -f config.log
 	rm -f config.h
 	rm -f Makefile
-	rm -f README
+
+MAINBRANCH=develop
+publish_doc: doc
+	git checkout gh-pages;
+	cp -rf doc/html/cil/* doc/ && git commit -am "Automatic doc update"; echo "Done publishing doc"; \
+	git checkout $(MAINBRANCH)
 
 cleancheck:
 	rm -f test/small1/*.o
