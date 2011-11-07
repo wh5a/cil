@@ -3,22 +3,6 @@ and the faster ocamlbuild-based way. If you go the latter route, there
 are a few assumptions made by the CIL distribution, so it's better to
 "make ocamlbuild" rather than directly running ocamlbuild.
 
-CIL has a C file that does some performance counter stuff, which it
-statically links against. This is fine by itself, but makes cil.cma
-unable to load by the toplevel. We can create a custom toplevel
-specifically for CIL, but that toplevel would fail to load other
-libraries that depend on any libraries not linked in by CIL. This
-frustration motivated me to change CIL to dynamic linking.
-
-ocamlbuild is faster, but customizing it is confusing, especially in
-dealing with C stubs. I find the old Makefile more pleasant to work
-with. I've made changes in the following ways:
-  1. Change ocaml toolchain to use native binaries, speeding things up a lot!
-  2. Make the cilly target depend on cillib
-  3. Change static linking to dynamic linking. 
-Because we changed to dynamic linking, ocaml must know where to find the .so:
-   sudo sh -c "echo $(ocamlfind query cil) >> $(ocamlfind printconf ldconf)"
-
 We do not want to build everything during development. We only build
 bytecode, because of its support of debugging and incremental compilation.
 To create type annotations for use with Emacs, we do
