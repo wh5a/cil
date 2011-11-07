@@ -6,7 +6,7 @@ are a few assumptions made by the CIL distribution, so it's better to
 We do not want to build everything during development. We only build
 bytecode, because of its support of debugging and incremental compilation.
 To create type annotations for use with Emacs, we do
-   make cilly COMPILEFLAGS+="-annot"
+   make cilly cillib COMPILEFLAGS+="-annot"
 
 The emacs mode that comes with ocaml can show type information
 annotated by the compiler with -annot (-dtypes is deprecated). Tuareg
